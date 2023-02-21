@@ -3,7 +3,7 @@ name: BUILD GL.iNET AX1800 5.4
 on:
   push:
     paths:
-      - '.github/workflows/build-5.4.yml'
+      - '.github/workflows/build-5.4.yaml'
     branches:
       - main
 
