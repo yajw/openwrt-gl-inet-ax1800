@@ -1,0 +1,106 @@
+name: BUILD GL.iNET AX1800
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-official-gl-inet-ax1800.yaml'
+    branches:
+      - main
+
+#   schedule:
+#     - cron: 0 16 * * *
+
+env:
+  REPO_URL: https://github.com/gl-inet/gl-infra-builder
+  REPO_BRANCH: main
+  UPLOAD_BIN_DIR: true
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+  OFFICIAL: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@main
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install build-essential libncurses5-dev gawk git libssl-dev gettext zlib1g-dev swig unzip time rsync python3 python3-setuptools python3-yaml subversion make gcc -y
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        echo $PWD
+        echo $GITHUB_WORKSPACE
+        git clone $REPO_URL -b $REPO_BRANCH gl-infra-builder
+        ln -sf /workdir/gl-infra-builder $GITHUB_WORKSPACE/gl-infra-builder
+        cd $GITHUB_WORKSPACE
+
+    - name: run official setup.py
+      if: env.OFFICIAL == 'true'
+      run: |
+        cd /workdir/gl-infra-builder
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@github.com"
+        python3 setup.py -c configs/config-wlan-ap.yml
+        cd /workdir/gl-infra-builder/wlan-ap/openwrt
+        ./scripts/gen_config.py target_wlan_ap-gl-ax1800-5-4 luci
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        make defconfig
+        make -j$(expr $(nproc) + 1) GL_PKGDIR=/workdir/glinet/ipq60xx/ V=s
+
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled() && !failure()
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled() && !failure()
+      run: |
+        echo "::set-output name=release_tag::AX1800-$(date +"%Y.%m.%d-%H.%M")"
+        touch release.txt
+        echo "## 📦‍ 固件下载 | GLINET AX1800" >> release.txt
+        [ $UPLOAD_WETRANSFER = true ] && echo "- 🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo -e "## ✨ 主要功能\n1. argon主题\n2. argon主题设置\n3. 释放内存\n4. wol 网络唤醒\n5. 磁盘管理工具\n6. smartdns DNS防污染\n7. clash的图形代理软件\n8. aria2下载工具\n9. ZeroTier内网穿透\n10. Turbo ACC 网络加速(支持 Fast Path 或者 硬件 NAT)\n11. 迅雷快鸟\n12. CPU 性能优化调节\n13. ttyd 终端\n14. 微信/Telegram推送\n15. BT下载工具" >> release.txt
+        echo "::set-output name=status::success"
+
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && !cancelled() && !failure()
+      env:
+        GITHUB_TOKEN: ${{ secrets.AC_GH_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+
+    - name: Delete workflow runs
+      uses: GitRML/delete-workflow-runs@main
+      with:
+        retain_days: 1
+        keep_minimum_runs: 3
+
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@v0.2.0
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled() && !failure()
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}        
