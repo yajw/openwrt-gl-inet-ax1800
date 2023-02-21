@@ -56,12 +56,23 @@ jobs:
         git config --global user.email "github-actions[bot]@github.com"
         python3 setup.py -c configs/config-wlan-ap.yml
         cd /workdir/gl-infra-builder/wlan-ap/openwrt
-        ./scripts/gen_config.py target_wlan_ap-gl-ax1800-5-4 luci
+        ./scripts/gen_config.py target_wlan_ap-gl-ax1800-5-4 openwrt_common luci
         ./scripts/feeds update -a
         ./scripts/feeds install -a
         make defconfig
-        make -j$(expr $(nproc) + 1) GL_PKGDIR=/workdir/glinet/ipq60xx/ V=s
-
+        make -j$(expr $(nproc) + 1) V=s
+        cd /workdir/gl-infra-builder/wlan-ap/openwrt/files/etc
+        echo "$(date +"%Y.%m.%d")" >./glversion
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        
+    - name: Upload bin directory
+      uses: actions/upload-artifact@main
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: /workdir/gl-infra-builder/wlan-ap/openwrt/bin
+        
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled() && !failure()
